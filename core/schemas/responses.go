@@ -137,6 +137,7 @@ type ResponsesTextConfigFormatJSONSchema struct {
 	Properties           *map[string]any `json:"properties,omitempty"`
 	Required             []string        `json:"required,omitempty"`
 	Type                 *string         `json:"type,omitempty"`
+	Defs                 *map[string]any `json:"$defs,omitempty"`
 }
 
 type ResponsesResponseConversation struct {

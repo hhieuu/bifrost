@@ -2037,6 +2037,10 @@ func reconstructSchemaFromJSONSchema(jsonSchema *schemas.ResponsesTextConfigForm
 		// New format: Schema is spread across individual fields
 		schema = make(map[string]interface{})
 
+		if jsonSchema.Defs != nil {
+			schema["$defs"] = *jsonSchema.Defs
+		}
+
 		if jsonSchema.Type != nil {
 			schema["type"] = *jsonSchema.Type
 		}
