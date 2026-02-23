@@ -178,6 +178,16 @@ env.BIFROST_QDRANT_API_KEY
 {{- end -}}
 {{- end -}}
 
+{{- define "bifrost.pinecone.apiKey" -}}
+{{- if .Values.vectorStore.pinecone.external.enabled -}}
+{{- if .Values.vectorStore.pinecone.external.existingSecret -}}
+env.BIFROST_PINECONE_API_KEY
+{{- else -}}
+{{- .Values.vectorStore.pinecone.external.apiKey -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "bifrost.qdrant.useTls" -}}
 {{- if .Values.vectorStore.qdrant.external.enabled -}}
 {{- .Values.vectorStore.qdrant.external.useTls -}}
@@ -308,6 +318,9 @@ false
 {{- end }}
 {{- $_ := set $governance "virtual_keys" $vks }}
 {{- end }}
+{{- if .Values.bifrost.governance.routingRules }}
+{{- $_ := set $governance "routing_rules" .Values.bifrost.governance.routingRules }}
+{{- end }}
 {{- if .Values.bifrost.governance.authConfig }}
 {{- $authConfig := dict }}
 {{- if and .Values.bifrost.governance.authConfig.existingSecret .Values.bifrost.governance.authConfig.usernameKey }}
@@ -330,7 +343,7 @@ false
 {{- $_ := set $governance "auth_config" $authConfig }}
 {{- end }}
 {{- end }}
-{{- if or $governance.budgets $governance.rate_limits $governance.customers $governance.teams $governance.virtual_keys $governance.auth_config }}
+{{- if or $governance.budgets $governance.rate_limits $governance.customers $governance.teams $governance.virtual_keys $governance.routing_rules $governance.auth_config }}
 {{- $_ := set $config "governance" $governance }}
 {{- end }}
 {{- end }}
@@ -520,6 +533,12 @@ false
 {{- end }}
 {{- $_ := set $weaviateConfig "grpc_config" $grpcConfig }}
 {{- end }}
+{{- if .Values.vectorStore.weaviate.external.timeout }}
+{{- $_ := set $weaviateConfig "timeout" .Values.vectorStore.weaviate.external.timeout }}
+{{- end }}
+{{- if .Values.vectorStore.weaviate.external.className }}
+{{- $_ := set $weaviateConfig "class_name" .Values.vectorStore.weaviate.external.className }}
+{{- end }}
 {{- end }}
 {{- $_ := set $vectorStore "config" $weaviateConfig }}
 {{- else if eq .Values.vectorStore.type "redis" }}
@@ -529,8 +548,41 @@ false
 {{- $_ := set $redisConfig "password" $password }}
 {{- end }}
 {{- if .Values.vectorStore.redis.external.enabled }}
+{{- if .Values.vectorStore.redis.external.username }}
+{{- $_ := set $redisConfig "username" .Values.vectorStore.redis.external.username }}
+{{- end }}
 {{- if .Values.vectorStore.redis.external.database }}
 {{- $_ := set $redisConfig "db" .Values.vectorStore.redis.external.database }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.poolSize }}
+{{- $_ := set $redisConfig "pool_size" .Values.vectorStore.redis.external.poolSize }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.maxActiveConns }}
+{{- $_ := set $redisConfig "max_active_conns" .Values.vectorStore.redis.external.maxActiveConns }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.minIdleConns }}
+{{- $_ := set $redisConfig "min_idle_conns" .Values.vectorStore.redis.external.minIdleConns }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.maxIdleConns }}
+{{- $_ := set $redisConfig "max_idle_conns" .Values.vectorStore.redis.external.maxIdleConns }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.connMaxLifetime }}
+{{- $_ := set $redisConfig "conn_max_lifetime" .Values.vectorStore.redis.external.connMaxLifetime }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.connMaxIdleTime }}
+{{- $_ := set $redisConfig "conn_max_idle_time" .Values.vectorStore.redis.external.connMaxIdleTime }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.dialTimeout }}
+{{- $_ := set $redisConfig "dial_timeout" .Values.vectorStore.redis.external.dialTimeout }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.readTimeout }}
+{{- $_ := set $redisConfig "read_timeout" .Values.vectorStore.redis.external.readTimeout }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.writeTimeout }}
+{{- $_ := set $redisConfig "write_timeout" .Values.vectorStore.redis.external.writeTimeout }}
+{{- end }}
+{{- if .Values.vectorStore.redis.external.contextTimeout }}
+{{- $_ := set $redisConfig "context_timeout" .Values.vectorStore.redis.external.contextTimeout }}
 {{- end }}
 {{- end }}
 {{- $_ := set $vectorStore "config" $redisConfig }}
@@ -547,12 +599,70 @@ false
 {{- $_ := set $qdrantConfig "use_tls" false }}
 {{- end }}
 {{- $_ := set $vectorStore "config" $qdrantConfig }}
+{{- else if eq .Values.vectorStore.type "pinecone" }}
+{{- $pineconeConfig := dict }}
+{{- $apiKey := include "bifrost.pinecone.apiKey" . }}
+{{- if $apiKey }}
+{{- $_ := set $pineconeConfig "api_key" $apiKey }}
+{{- end }}
+{{- if .Values.vectorStore.pinecone.external.indexHost }}
+{{- $_ := set $pineconeConfig "index_host" .Values.vectorStore.pinecone.external.indexHost }}
+{{- end }}
+{{- $_ := set $vectorStore "config" $pineconeConfig }}
 {{- end }}
 {{- $_ := set $config "vector_store" $vectorStore }}
 {{- end }}
 {{- /* MCP */ -}}
 {{- if .Values.bifrost.mcp.enabled }}
-{{- $mcpConfig := dict "client_configs" .Values.bifrost.mcp.clientConfigs }}
+{{- $clientConfigs := list }}
+{{- range $idx, $client := .Values.bifrost.mcp.clientConfigs }}
+{{- $cc := dict "name" $client.name }}
+{{- /* Map connectionType: websocket -> sse, others pass through */ -}}
+{{- if eq $client.connectionType "websocket" }}
+{{- $_ := set $cc "connection_type" "sse" }}
+{{- else }}
+{{- $_ := set $cc "connection_type" $client.connectionType }}
+{{- end }}
+{{- /* Map httpConfig.url / websocketConfig.url -> connection_string */ -}}
+{{- if and (eq $client.connectionType "http") $client.httpConfig }}
+{{- $_ := set $cc "connection_string" $client.httpConfig.url }}
+{{- end }}
+{{- if and (eq $client.connectionType "websocket") $client.websocketConfig }}
+{{- $_ := set $cc "connection_string" $client.websocketConfig.url }}
+{{- end }}
+{{- /* Map stdioConfig -> stdio_config */ -}}
+{{- if $client.stdioConfig }}
+{{- $stdio := dict "command" $client.stdioConfig.command }}
+{{- if $client.stdioConfig.args }}
+{{- $_ := set $stdio "args" $client.stdioConfig.args }}
+{{- end }}
+{{- if $client.stdioConfig.envs }}
+{{- $_ := set $stdio "envs" $client.stdioConfig.envs }}
+{{- end }}
+{{- $_ := set $cc "stdio_config" $stdio }}
+{{- end }}
+{{- /* Pass through fields that are already snake_case or flat */ -}}
+{{- if $client.headers }}
+{{- $_ := set $cc "headers" $client.headers }}
+{{- end }}
+{{- if $client.tools_to_execute }}
+{{- $_ := set $cc "tools_to_execute" $client.tools_to_execute }}
+{{- end }}
+{{- if $client.tools_to_auto_execute }}
+{{- $_ := set $cc "tools_to_auto_execute" $client.tools_to_auto_execute }}
+{{- end }}
+{{- if $client.auth_type }}
+{{- $_ := set $cc "auth_type" $client.auth_type }}
+{{- end }}
+{{- if $client.oauth_config_id }}
+{{- $_ := set $cc "oauth_config_id" $client.oauth_config_id }}
+{{- end }}
+{{- if hasKey $client "is_ping_available" }}
+{{- $_ := set $cc "is_ping_available" $client.is_ping_available }}
+{{- end }}
+{{- $clientConfigs = append $clientConfigs $cc }}
+{{- end }}
+{{- $mcpConfig := dict "client_configs" $clientConfigs }}
 {{- if .Values.bifrost.mcp.toolManagerConfig }}
 {{- $tmConfig := dict }}
 {{- if .Values.bifrost.mcp.toolManagerConfig.toolExecutionTimeout }}
@@ -618,6 +728,9 @@ false
 {{- if $inputConfig.vector_store_namespace }}
 {{- $_ := set $scConfig "vector_store_namespace" $inputConfig.vector_store_namespace }}
 {{- end }}
+{{- if $inputConfig.default_cache_key }}
+{{- $_ := set $scConfig "default_cache_key" $inputConfig.default_cache_key }}
+{{- end }}
 {{- if hasKey $inputConfig "conversation_history_threshold" }}
 {{- $_ := set $scConfig "conversation_history_threshold" $inputConfig.conversation_history_threshold }}
 {{- end }}
@@ -649,6 +762,15 @@ false
 {{- end }}
 {{- if $inputConfig.protocol }}
 {{- $_ := set $otelConfig "protocol" $inputConfig.protocol }}
+{{- end }}
+{{- if hasKey $inputConfig "metrics_enabled" }}
+{{- $_ := set $otelConfig "metrics_enabled" $inputConfig.metrics_enabled }}
+{{- end }}
+{{- if $inputConfig.metrics_endpoint }}
+{{- $_ := set $otelConfig "metrics_endpoint" $inputConfig.metrics_endpoint }}
+{{- end }}
+{{- if $inputConfig.metrics_push_interval }}
+{{- $_ := set $otelConfig "metrics_push_interval" $inputConfig.metrics_push_interval }}
 {{- end }}
 {{- $plugins = append $plugins (dict "enabled" true "name" "otel" "config" $otelConfig) }}
 {{- end }}
